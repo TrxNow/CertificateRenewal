@@ -1,0 +1,11 @@
+# renewal_lead_days: days before cert expiry the "renewal notice" email is sent (default 30).
+# Reminders go out 7, 3, and 1 days before that notice.
+
+renewal_lead_days: 30
+
+clients:
+  - id: att
+    name: ATT
+    domain: att.com
+    notify_emails:
+      - gavin.norwood@trx-now.com
