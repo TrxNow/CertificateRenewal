@@ -69,11 +69,19 @@ def send_issued_email(
     renewal_notice_on: str,
     expires_on: str,
     attachments: Iterable[Path],
+    dev_test: bool = False,
 ) -> None:
-    subject = f"[Certificate] {client_name}: new certificate issued"
+    prefix = "[TEST] " if dev_test else ""
+    subject = f"{prefix}[Certificate] {client_name}: new certificate issued"
+    warning = (
+        "THIS IS A DEV-MODE TEST. These files are a fake self-signed certificate. "
+        "Do not send them to AT&T.\n\n"
+        if dev_test
+        else ""
+    )
     body = f"""Hello,
 
-The Let's Encrypt certificate for {client_name} ({domain}) was renewed. The public certificate files are attached so they can be sent to AT&T.
+{warning}The Let's Encrypt certificate for {client_name} ({domain}) was renewed. The public certificate files are attached so they can be sent to AT&T.
 
 Domain: {domain}
 Renewal notice date (UTC): {renewal_notice_on}
@@ -172,6 +180,11 @@ def main() -> None:
         dest="attachments",
         help="Public certificate PEM to attach (issued emails). Never attach privkey.pem.",
     )
+    parser.add_argument(
+        "--dev-test",
+        action="store_true",
+        help="Mark issued email as a fake dev-mode test (do not send to AT&T)",
+    )
     args = parser.parse_args()
     if not args.recipients:
         raise SystemExit("--to is required")
@@ -219,6 +232,7 @@ def main() -> None:
             renewal_notice_on=args.renewal_notice_on,
             expires_on=args.expires_on,
             attachments=attachments,
+            dev_test=args.dev_test,
         )
         print(f"Sent new certificate for {args.domain} to {', '.join(args.recipients)}")
     else:

@@ -83,6 +83,94 @@ def public_cert_files(config_dir: Path) -> list[Path]:
     return found
 
 
+def make_dev_test_certs(client_id: str, domain: str) -> list[Path]:
+    """Create a fake public cert trio for dev-mode email tests. Private key is deleted."""
+    out_dir = REPO_ROOT / "logs" / "dev-certs" / client_id / domain.replace("*", "star")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    cert = out_dir / "cert.pem"
+    chain = out_dir / "chain.pem"
+    fullchain = out_dir / "fullchain.pem"
+    ca_key = out_dir / "ca.key"
+    leaf_key = out_dir / "privkey.pem"
+    csr = out_dir / "leaf.csr"
+    serial = out_dir / "ca.srl"
+    try:
+        subprocess.run(
+            [
+                "openssl",
+                "req",
+                "-x509",
+                "-newkey",
+                "rsa:2048",
+                "-keyout",
+                str(ca_key),
+                "-out",
+                str(chain),
+                "-days",
+                "365",
+                "-nodes",
+                "-subj",
+                f"/CN=CertificateRenewal Test CA ({client_id})",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(
+            [
+                "openssl",
+                "req",
+                "-newkey",
+                "rsa:2048",
+                "-keyout",
+                str(leaf_key),
+                "-out",
+                str(csr),
+                "-nodes",
+                "-subj",
+                f"/CN={domain}",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(
+            [
+                "openssl",
+                "x509",
+                "-req",
+                "-in",
+                str(csr),
+                "-CA",
+                str(chain),
+                "-CAkey",
+                str(ca_key),
+                "-CAcreateserial",
+                "-out",
+                str(cert),
+                "-days",
+                "90",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        fullchain.write_text(cert.read_text(encoding="utf-8") + chain.read_text(encoding="utf-8"), encoding="utf-8")
+    except (FileNotFoundError, subprocess.CalledProcessError) as exc:
+        print(f"  WARN: openssl test cert failed ({exc}); using placeholder PEMs")
+        placeholder = (
+            "-----BEGIN CERTIFICATE-----\n"
+            "DEV-MODE-TEST-CERTIFICATE-NOT-REAL\n"
+            "-----END CERTIFICATE-----\n"
+        )
+        for path in (cert, chain, fullchain):
+            path.write_text(placeholder, encoding="utf-8")
+    finally:
+        for leftover in (ca_key, leaf_key, csr, serial):
+            leftover.unlink(missing_ok=True)
+    return [fullchain, cert, chain]
+
+
 def run_email(
     client: dict,
     *,
@@ -92,6 +180,7 @@ def run_email(
     recipients: list[str],
     days_until_notice: int | None = None,
     attachments: list[Path] | None = None,
+    dev_test: bool = False,
 ) -> None:
     if not recipients:
         print("  WARN: no recipients in config/recipients.txt - skipping email")
@@ -112,6 +201,8 @@ def run_email(
     ]
     if kind == "reminder":
         cmd.extend(["--days-until-renewal-notice", str(days_until_notice)])
+    if dev_test:
+        cmd.append("--dev-test")
     for path in attachments or []:
         cmd.extend(["--attach", str(path)])
     for addr in recipients:
@@ -283,11 +374,14 @@ def main() -> None:
             issued_files = certbot_renew(cid, dry_run=dry_run)
         except subprocess.CalledProcessError:
             print("  ERROR: certbot failed")
-            errors += 1
-            continue
+            if not dev_mode:
+                errors += 1
+                continue
 
-        if dry_run:
-            continue
+        if dev_mode:
+            print("  DEV_MODE: creating fake test certificate for email")
+            issued_files = make_dev_test_certs(cid, domain)
+
         if not issued_files:
             print("  no new certificate issued")
             continue
@@ -309,6 +403,7 @@ def main() -> None:
                 renewal_notice_on=renewal_notice_on or "unknown",
                 recipients=recipients,
                 attachments=issued_files,
+                dev_test=dev_mode,
             )
         except subprocess.CalledProcessError:
             errors += 1
