@@ -189,7 +189,7 @@ def main() -> None:
     parser.add_argument(
         "--dev",
         action="store_true",
-        help="Dev mode: certbot renew --dry-run; skip email (also set DEV_MODE=true)",
+        help="Dev mode: certbot renew --dry-run; still send emails (also set DEV_MODE=true)",
     )
     parser.add_argument(
         "--send-test-email",
@@ -211,10 +211,13 @@ def main() -> None:
         )
         return
 
-    dry_run = args.dry_run or in_dev_mode(cli_flag=args.dev)
+    dev_mode = in_dev_mode(cli_flag=args.dev)
+    dry_run = args.dry_run or dev_mode
+    skip_email = args.dry_run and not dev_mode
     if dry_run:
-        reason = "DEV_MODE" if in_dev_mode(cli_flag=args.dev) else "--dry-run"
-        print(f"{reason}: certbot renew will use --dry-run (no emails)")
+        extra = " (emails still send)" if not skip_email else " (no emails)"
+        reason = "DEV_MODE" if dev_mode else "--dry-run"
+        print(f"{reason}: certbot renew will use --dry-run{extra}")
 
     if not args.config.is_file():
         raise SystemExit(f"Missing {args.config}")
@@ -224,7 +227,7 @@ def main() -> None:
         raise SystemExit("No clients in config/clients.yaml")
 
     recipients = load_recipients(args.recipients)
-    if not dry_run and not recipients:
+    if not skip_email and not recipients:
         print(f"WARN: no recipients found in {args.recipients}")
 
     errors = 0
@@ -251,7 +254,7 @@ def main() -> None:
             print(f"  WARN: could not read live cert: {exc}")
             until_notice = None
 
-        if not dry_run and until_notice is not None:
+        if not skip_email and until_notice is not None:
             try:
                 if until_notice in REMINDER_DAYS_BEFORE_RENEWAL_NOTICE:
                     print(f"  sending {until_notice}-day reminder (before renewal notice)")

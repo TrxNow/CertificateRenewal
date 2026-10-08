@@ -35,7 +35,7 @@ Then:
 
 Logs go to `logs/renewal-YYYY-MM-DD.log`.
 
-**Dev mode** (`DEV_MODE=true` in `.env`, or `--dev`): `certbot renew --dry-run` and no emails. Set `DEV_MODE=false` for real renewals.
+**Dev mode** (`DEV_MODE=true` in `.env`, or `--dev`): `certbot renew --dry-run`, but reminder/notice emails still send. The new-certificate attachment email only goes out after a real issue (not in dry-run). Set `DEV_MODE=false` for real renewals.
 
 ## Add a client
 
