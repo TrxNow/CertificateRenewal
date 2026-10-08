@@ -22,11 +22,9 @@ From the repo root:
 
 That will:
 
-1. Install `certbot`, `python`, and `cronie` with pacman
-2. Enable `cronie.service`
-3. Create `.venv` and install Python deps
-4. Create `.env` from `.env.example` if missing
-5. Install a user crontab: `0 12 * * * <repo>/scripts/run-renewal.sh`
+1. Create `.venv` and install Python deps plus `certbot` with pip (no pacman DBs required)
+2. Create `.env` from `.env.example` if missing
+3. Enable a systemd user timer at 12:00 daily (`certificate-renewal.timer`)
 
 Then:
 

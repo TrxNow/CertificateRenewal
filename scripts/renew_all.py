@@ -127,6 +127,16 @@ def in_dev_mode(*, cli_flag: bool = False) -> bool:
     return cli_flag or truthy_env("DEV_MODE")
 
 
+def certbot_bin() -> str:
+    override = os.environ.get("CERTBOT", "").strip()
+    if override:
+        return override
+    venv_certbot = REPO_ROOT / ".venv" / "bin" / "certbot"
+    if venv_certbot.is_file():
+        return str(venv_certbot)
+    return "certbot"
+
+
 def certbot_renew(client_id: str, *, dry_run: bool) -> list[Path]:
     """Run certbot renew. Return public cert files that were newly issued."""
     config, work, logs = client_dirs(client_id)
@@ -136,7 +146,7 @@ def certbot_renew(client_id: str, *, dry_run: bool) -> list[Path]:
         print(f"  WARN: no renewal/*.conf under {config} - certbot has nothing to renew")
     before = {path.resolve(): path.resolve().read_bytes() for path in public_cert_files(config)}
     cmd = [
-        "certbot",
+        certbot_bin(),
         "renew",
         "--non-interactive",
         "--config-dir",
@@ -181,7 +191,25 @@ def main() -> None:
         action="store_true",
         help="Dev mode: certbot renew --dry-run; skip email (also set DEV_MODE=true)",
     )
+    parser.add_argument(
+        "--send-test-email",
+        action="store_true",
+        help="Send a test email to config/recipients.txt and exit (ignores --dev)",
+    )
     args = parser.parse_args()
+
+    if args.send_test_email:
+        recipients = load_recipients(args.recipients)
+        if not recipients:
+            raise SystemExit(f"No recipients in {args.recipients}")
+        run_email(
+            {"id": "test", "name": "test", "domain": "test"},
+            kind="test",
+            expires_on="n/a",
+            renewal_notice_on="n/a",
+            recipients=recipients,
+        )
+        return
 
     dry_run = args.dry_run or in_dev_mode(cli_flag=args.dev)
     if dry_run:

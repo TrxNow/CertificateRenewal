@@ -105,6 +105,23 @@ The private key is not attached. Do not email the private key.
     _smtp_send(msg)
 
 
+def send_test_email(*, to_addresses: Iterable[str]) -> None:
+    subject = "[Certificate] test email"
+    body = """Hello,
+
+This is a test from the certificate renewal job. SMTP is working.
+
+You will get reminder and renewal emails only on the scheduled days, and a certificate-attachment email only after certbot issues a new cert.
+
+— Certificate Renewal automation
+"""
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["To"] = ", ".join(to_addresses)
+    msg.set_content(body)
+    _smtp_send(msg)
+
+
 def send_renewal_email(
     *,
     to_addresses: Iterable[str],
@@ -133,14 +150,14 @@ Certificate expiration (UTC): {expires_on}
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--client-name", required=True)
-    parser.add_argument("--domain", required=True)
-    parser.add_argument("--expires-on", required=True)
-    parser.add_argument("--renewal-notice-on", required=True)
-    parser.add_argument("--to", action="append", required=True, dest="recipients")
+    parser.add_argument("--client-name")
+    parser.add_argument("--domain")
+    parser.add_argument("--expires-on")
+    parser.add_argument("--renewal-notice-on")
+    parser.add_argument("--to", action="append", dest="recipients")
     parser.add_argument(
         "--kind",
-        choices=("reminder", "renewal", "issued"),
+        choices=("reminder", "renewal", "issued", "test"),
         required=True,
     )
     parser.add_argument(
@@ -156,6 +173,26 @@ def main() -> None:
         help="Public certificate PEM to attach (issued emails). Never attach privkey.pem.",
     )
     args = parser.parse_args()
+    if not args.recipients:
+        raise SystemExit("--to is required")
+
+    if args.kind == "test":
+        send_test_email(to_addresses=args.recipients)
+        print(f"Sent test email to {', '.join(args.recipients)}")
+        return
+
+    missing = [
+        name
+        for name, value in (
+            ("--client-name", args.client_name),
+            ("--domain", args.domain),
+            ("--expires-on", args.expires_on),
+            ("--renewal-notice-on", args.renewal_notice_on),
+        )
+        if not value
+    ]
+    if missing:
+        raise SystemExit(f"{', '.join(missing)} required for {args.kind}")
 
     if args.kind == "reminder":
         if args.days_until_renewal_notice is None:

@@ -1,27 +1,26 @@
 #!/usr/bin/env bash
-# Install certbot, Python deps, cronie, and a daily crontab on Omarchy (Arch).
+# Install Python deps, certbot (in .venv), and a daily systemd timer on Omarchy.
+# Does not require pacman package DBs (common on a fresh Omarchy install).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-CRON_MARKER="CertificateRenewal/scripts/run-renewal.sh"
-CRON_SCHEDULE="${CRON_SCHEDULE:-0 12 * * *}"
-INSTALL_CRON=1
+INSTALL_TIMER=1
 
 usage() {
   cat <<'EOF'
-Usage: scripts/install-omarchy.sh [--no-cron]
+Usage: scripts/install-omarchy.sh [--no-timer]
 
-Installs certbot, cronie, a local .venv, and a daily crontab that runs
-scripts/run-renewal.sh at 12:00 (local time).
+Creates .venv, installs PyYAML + certbot with pip, and enables a daily
+systemd user timer at 12:00.
 
-  --no-cron   Install packages and the venv only
+  --no-timer   Install the venv only
 EOF
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --no-cron) INSTALL_CRON=0 ;;
+    --no-timer|--no-cron) INSTALL_TIMER=0 ;;
     -h|--help)
       usage
       exit 0
@@ -35,21 +34,17 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-if ! command -v pacman >/dev/null 2>&1; then
-  echo "This installer is for Omarchy/Arch (pacman not found)." >&2
+PYTHON="$(command -v python3 || command -v python || true)"
+if [[ -z "$PYTHON" ]]; then
+  echo "python3 is not on PATH. Install Python, then rerun." >&2
   exit 1
 fi
 
-echo "Installing certbot, python, and cronie..."
-sudo pacman -S --needed --noconfirm certbot python python-pip cronie
-
-echo "Enabling cronie..."
-sudo systemctl enable --now cronie.service
-
-echo "Creating Python venv..."
-python -m venv "$REPO_ROOT/.venv"
+echo "Using $PYTHON"
+echo "Creating Python venv and installing certbot..."
+"$PYTHON" -m venv "$REPO_ROOT/.venv"
 "$REPO_ROOT/.venv/bin/pip" install --upgrade pip
-"$REPO_ROOT/.venv/bin/pip" install -r "$REPO_ROOT/scripts/requirements.txt"
+"$REPO_ROOT/.venv/bin/pip" install -r "$REPO_ROOT/scripts/requirements.txt" certbot
 
 chmod +x "$REPO_ROOT/scripts/run-renewal.sh" "$REPO_ROOT/scripts/install-omarchy.sh"
 
@@ -58,18 +53,38 @@ if [[ ! -f "$REPO_ROOT/.env" ]]; then
   echo "Created $REPO_ROOT/.env — add SMTP settings and set DEV_MODE."
 fi
 
-if [[ "$INSTALL_CRON" -eq 1 ]]; then
-  cron_line="$CRON_SCHEDULE $REPO_ROOT/scripts/run-renewal.sh"
-  existing="$(crontab -l 2>/dev/null || true)"
-  filtered="$(printf '%s\n' "$existing" | grep -v "$CRON_MARKER" || true)"
-  {
-    [[ -n "$filtered" ]] && printf '%s\n' "$filtered"
-    printf '%s\n' "$cron_line"
-  } | crontab -
-  echo "Installed crontab: $cron_line"
-  crontab -l
-else
-  echo "Skipped crontab (--no-cron)."
+if [[ "$INSTALL_TIMER" -eq 1 ]]; then
+  unit_dir="$HOME/.config/systemd/user"
+  mkdir -p "$unit_dir"
+  cat >"$unit_dir/certificate-renewal.service" <<EOF
+[Unit]
+Description=Let's Encrypt certificate renewal
+
+[Service]
+Type=oneshot
+WorkingDirectory=$REPO_ROOT
+Environment=PATH=$REPO_ROOT/.venv/bin:/usr/bin
+ExecStart=$REPO_ROOT/scripts/run-renewal.sh
+EOF
+  cat >"$unit_dir/certificate-renewal.timer" <<EOF
+[Unit]
+Description=Daily Let's Encrypt certificate renewal
+
+[Timer]
+OnCalendar=*-*-* 12:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+  systemctl --user daemon-reload
+  systemctl --user enable --now certificate-renewal.timer
+  if command -v loginctl >/dev/null 2>&1; then
+    loginctl enable-linger "$USER" 2>/dev/null || \
+      echo "Could not enable linger; the timer runs while you are logged in."
+  fi
+  echo "Installed systemd timer: certificate-renewal.timer (12:00 daily)"
+  systemctl --user list-timers certificate-renewal.timer --no-pager || true
 fi
 
 echo
