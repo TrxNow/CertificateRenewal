@@ -24,7 +24,7 @@ That will:
 
 1. Create `.venv` and install Python deps plus `certbot` with pip (no pacman DBs required)
 2. Create `.env` from `.env.example` if missing
-3. Enable a systemd user timer at 12:00 daily (`certificate-renewal.timer`)
+3. Enable a **system** systemd timer at **12:00 local time every day** (`certificate-renewal.timer`). It runs even if you are logged out. `Persistent=true` runs a missed job after the machine wakes or boots.
 
 Then:
 
@@ -34,6 +34,18 @@ Then:
 4. Test: `./scripts/run-renewal.sh --dev`
 
 Logs go to `logs/renewal-YYYY-MM-DD.log`.
+
+Confirm the daily timer:
+
+```bash
+./scripts/timer-status.sh
+```
+
+To change the time (example 9:00 AM local) and reinstall:
+
+```bash
+TIMER_TIME=09:00 ./scripts/install-omarchy.sh
+```
 
 **Dev mode** (`DEV_MODE=true` in `.env`, or `--dev`): `certbot renew --dry-run`, then a **fake test certificate** is emailed so you can verify SMTP and attachments. The subject is marked `[TEST]` — do not send those files to AT&T. Set `DEV_MODE=false` for real renewals.
 
@@ -66,6 +78,6 @@ Put these in **`.env`** on the Omarchy host (not in git):
 
 | Variable | Purpose |
 |----------|---------|
-| `DEV_MODE` | `true` = `--dry-run`, skip email |
+| `DEV_MODE` | `true` = `--dry-run` plus a fake test-cert email |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` | Alert emails |
 | `SMTP_FROM` | Optional |

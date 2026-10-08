@@ -1,8 +1,8 @@
-# Daily certificate renewal on Omarchy (cronie).
-# Install with: ./scripts/install-omarchy.sh
-# Or paste the line below into `crontab -e` after replacing REPO_ROOT.
-
-SHELL=/bin/bash
-PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
-
-0 12 * * * REPO_ROOT/scripts/run-renewal.sh
+# Optional. The Omarchy installer uses a systemd *system* timer instead,
+# which is more reliable than a user crontab (runs when logged out).
+#
+# Installer: ./scripts/install-omarchy.sh
+# Status:    ./scripts/timer-status.sh
+#
+# If you still want cronie:
+#   0 12 * * * REPO_ROOT/scripts/run-renewal.sh

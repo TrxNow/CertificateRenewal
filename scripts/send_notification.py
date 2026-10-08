@@ -78,13 +78,12 @@ def send_reminder_email(
 
 This is a reminder that the automated certificate renewal notice for {client_name} will be sent in {days_until_renewal_notice} day(s).
 
-Domain: {domain}
 Planned renewal notice date (UTC): {renewal_notice_on}
 Certificate expiration (UTC): {expires_on}
 
-You will receive a separate renewal email on the planned renewal notice date when the automation runs certbot renew.
+You will receive a separate email on the planned renewal notice date.
 
-— Certificate Renewal automation
+— Certificate Renewal
 """
     msg = EmailMessage()
     msg["Subject"] = subject
@@ -106,27 +105,25 @@ def send_issued_email(
     prefix = "[TEST] " if dev_test else ""
     subject = f"{prefix}[Certificate] {client_name}: new certificate issued"
     warning = (
-        "THIS IS A DEV-MODE TEST. These files are a fake self-signed certificate. "
-        "Do not send them to AT&T.\n\n"
+        "THIS IS A TEST MESSAGE. The attached files are a fake self-signed certificate "
+        "and should not be installed.\n\n"
         if dev_test
         else ""
     )
     body = f"""Hello,
 
-{warning}The Let's Encrypt certificate for {client_name} ({domain}) was renewed. The public certificate files are attached so they can be sent to AT&T.
+{warning}Please find the renewed public certificate files attached.
 
-Domain: {domain}
-Renewal notice date (UTC): {renewal_notice_on}
 New certificate expiration (UTC): {expires_on}
 
-Attached:
-- fullchain.pem — certificate plus chain (send this to AT&T)
+Attachments:
+- fullchain.pem — certificate plus chain (use this file)
 - cert.pem — leaf certificate only
 - chain.pem — intermediate chain only
 
-The private key is not attached. Do not email the private key.
+The private key is not included.
 
-— Certificate Renewal automation
+— Certificate Renewal
 """
     msg = EmailMessage()
     msg["Subject"] = subject
@@ -135,7 +132,7 @@ The private key is not attached. Do not email the private key.
     for path in attachments:
         if path.name.lower() == "privkey.pem":
             raise SystemExit("refusing to attach private key")
-        filename = f"{path.parent.name}-{path.name}"
+        filename = path.name
         msg.add_attachment(
             path.read_bytes(),
             maintype="application",
@@ -173,13 +170,12 @@ def send_renewal_email(
     subject = f"[Certificate] {client_name}: renewal in progress today"
     body = f"""Hello,
 
-This is the automated renewal notice for {client_name}. The certificate renewal job is running certbot renew today. If a new certificate is issued, you will receive a follow-up email with the public certificate files attached to send to AT&T.
+This is the automated renewal notice for {client_name}. Certificate renewal is running today. If a new certificate is issued, you will receive a follow-up email with the public certificate files attached.
 
-Domain: {domain}
 Renewal notice date (UTC): {renewal_notice_on}
 Certificate expiration (UTC): {expires_on}
 
-— Certificate Renewal automation
+— Certificate Renewal
 """
     msg = EmailMessage()
     msg["Subject"] = subject
@@ -215,7 +211,7 @@ def main() -> None:
     parser.add_argument(
         "--dev-test",
         action="store_true",
-        help="Mark issued email as a fake dev-mode test (do not send to AT&T)",
+        help="Mark issued email as a fake dev-mode test",
     )
     args = parser.parse_args()
     if not args.recipients:
