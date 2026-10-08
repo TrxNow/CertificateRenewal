@@ -12,22 +12,54 @@ from pathlib import Path
 from typing import Iterable
 
 
+def _env(name: str, default: str = "") -> str:
+    value = os.environ.get(name, default)
+    return value.strip().strip("\"'").strip()
+
+
 def _smtp_send(msg: EmailMessage) -> None:
-    smtp_host = os.environ["SMTP_HOST"]
-    smtp_port = int(os.environ.get("SMTP_PORT", "587"))
-    smtp_user = os.environ["SMTP_USER"]
-    smtp_password = os.environ["SMTP_PASSWORD"]
-    from_address = os.environ.get("SMTP_FROM", smtp_user)
+    smtp_host = _env("SMTP_HOST")
+    smtp_port = int(_env("SMTP_PORT", "587") or "587")
+    smtp_user = _env("SMTP_USER")
+    smtp_password = _env("SMTP_PASSWORD")
+    from_address = _env("SMTP_FROM") or smtp_user
+    missing = [
+        name
+        for name, value in (
+            ("SMTP_HOST", smtp_host),
+            ("SMTP_USER", smtp_user),
+            ("SMTP_PASSWORD", smtp_password),
+        )
+        if not value
+    ]
+    if missing:
+        raise SystemExit(
+            "Email failed: set these in .env (empty values cannot send mail): "
+            + ", ".join(missing)
+        )
+    if not from_address:
+        raise SystemExit("Email failed: set SMTP_FROM or SMTP_USER in .env")
+
     msg["From"] = from_address
+    print(f"Sending mail via {smtp_host}:{smtp_port} as {smtp_user}")
 
     context = ssl.create_default_context()
-    with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as server:
+    if smtp_port == 465:
+        server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=30, context=context)
+    else:
+        server = smtplib.SMTP(timeout=30)
+        server.connect(smtp_host, smtp_port)
         server.ehlo()
-        if smtp_port == 587:
-            server.starttls(context=context)
-            server.ehlo()
+        server.starttls(context=context)
+        server.ehlo()
+    try:
         server.login(smtp_user, smtp_password)
         server.send_message(msg)
+    finally:
+        try:
+            server.quit()
+        except smtplib.SMTPException:
+            server.close()
 
 
 def send_reminder_email(

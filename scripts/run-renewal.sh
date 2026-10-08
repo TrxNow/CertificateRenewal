@@ -8,11 +8,25 @@ cd "$REPO_ROOT"
 
 export PATH="$REPO_ROOT/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
+load_env() {
+  local file="$1" line key val
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    [[ -z "${line// /}" || "$line" == \#* ]] && continue
+    key="${line%%=*}"
+    val="${line#*=}"
+    key="${key%"${key##*[![:space:]]}"}"
+    if [[ "$val" == \"*\" && "$val" == *\" ]]; then
+      val="${val:1:${#val}-2}"
+    elif [[ "$val" == \'*\' && "$val" == *\' ]]; then
+      val="${val:1:${#val}-2}"
+    fi
+    export "$key=$val"
+  done <"$file"
+}
+
 if [[ -f "$REPO_ROOT/.env" ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  source "$REPO_ROOT/.env"
-  set +a
+  load_env "$REPO_ROOT/.env"
 fi
 
 export LETSENCRYPT_ROOT="${LETSENCRYPT_ROOT:-$REPO_ROOT/data/letsencrypt}"
