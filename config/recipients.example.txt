@@ -1,0 +1,3 @@
+# Copy to recipients.txt (or just edit recipients.txt).
+# One email address per line.
+ops@example.com

@@ -7,5 +7,3 @@ clients:
   - id: att
     name: ATT
     domain: att.com
-    notify_emails:
-      - gavin.norwood@trx-now.com

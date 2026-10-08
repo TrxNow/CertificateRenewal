@@ -1,6 +1,6 @@
 # Certificate Renewal
 
-Runs **`certbot renew` for every client** in `config/clients.yaml` and stores certbot data in git.
+Runs **`certbot renew` for every client** in `config/clients.yaml` on an **Omarchy** (Arch) host via a daily **cron** job.
 
 **Email sequence** (based on live cert expiry and `renewal_lead_days`, default **30**):
 
@@ -10,6 +10,34 @@ Runs **`certbot renew` for every client** in `config/clients.yaml` and stores ce
 | 33 days before expiry | Reminder: renewal notice in **3** days |
 | 31 days before expiry | Reminder: renewal notice in **1** day |
 | 30 days before expiry | **Renewal notice** (automation runs certbot that day) |
+| After certbot issues a new cert | **New certificate** email with `fullchain.pem`, `cert.pem`, and `chain.pem` attached (no private key) |
+
+## Setup on Omarchy
+
+From the repo root:
+
+```bash
+./scripts/install-omarchy.sh
+```
+
+That will:
+
+1. Install `certbot`, `python`, and `cronie` with pacman
+2. Enable `cronie.service`
+3. Create `.venv` and install Python deps
+4. Create `.env` from `.env.example` if missing
+5. Install a user crontab: `0 12 * * * <repo>/scripts/run-renewal.sh`
+
+Then:
+
+1. Edit **`.env`** (`DEV_MODE`, SMTP settings)
+2. Edit **`config/recipients.txt`** (one email per line)
+3. Import certbot files into `data/letsencrypt/<id>/` (see `data/letsencrypt/README.md`)
+4. Test: `./scripts/run-renewal.sh --dev`
+
+Logs go to `logs/renewal-YYYY-MM-DD.log`.
+
+**Dev mode** (`DEV_MODE=true` in `.env`, or `--dev`): `certbot renew --dry-run` and no emails. Set `DEV_MODE=false` for real renewals.
 
 ## Add a client
 
@@ -20,29 +48,26 @@ clients:
   - id: att
     name: ATT
     domain: www.example.com
-    notify_emails:
-      - you@example.com
 ```
 
-2. **Import certbot files** from your PC into `data/letsencrypt/<id>/` (see `data/letsencrypt/README.md`). On Windows, copy `C:\Certbot` → `config/`, `C:\Certbot\lib` → `work/`, `C:\Certbot\log` → `logs/`.
+2. Add notification addresses to **`config/recipients.txt`** (one email per line).
+3. **Import certbot files** into `data/letsencrypt/<id>/` (`id` must match the folder name).
 
-3. Commit and push.
+Repeat for each client.
 
-Repeat for each client (`id` must match the folder name under `data/letsencrypt/`).
+## Manual run
 
-## What runs in GitHub Actions
-
-Daily (12:00 UTC):
-
-1. For **each** client → check live `domain` expiry → email if **7, 3, or 1** days left.
-2. For **each** client → `certbot renew` (Let's Encrypt only issues when renewal is due; otherwise certbot exits successfully).
-3. Commit any changes under `data/letsencrypt/`.
-
-**Manual:** Actions → **Certificate renewal** → Run workflow. Enable **dry_run** for `certbot renew --dry-run` on all clients (no email, no commit).
+```bash
+./scripts/run-renewal.sh          # honors DEV_MODE from .env
+./scripts/run-renewal.sh --dev    # force dry-run
+```
 
 ## Secrets
 
-| Secret | Purpose |
-|--------|---------|
+Put these in **`.env`** on the Omarchy host (not in git):
+
+| Variable | Purpose |
+|----------|---------|
+| `DEV_MODE` | `true` = `--dry-run`, skip email |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` | Alert emails |
 | `SMTP_FROM` | Optional |

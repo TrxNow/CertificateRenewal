@@ -17,7 +17,7 @@ def prepare_config_for_runner(
 ) -> None:
     """
     Certbot on Windows stores absolute ``C:\\Certbot\\...`` paths in ``renewal/*.conf``.
-    GitHub Actions runs Linux certbot with repo-local dirs — rewrite those paths before renew.
+    Omarchy/Linux certbot uses repo-local dirs — rewrite those paths before renew.
     """
     config_dir = config_dir.resolve()
     work_dir = work_dir.resolve()

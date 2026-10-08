@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import socket
 import ssl
+import subprocess
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Tuple
 
 
@@ -25,6 +27,20 @@ def fetch_cert_dates(domain: str, timeout: float = 15.0) -> Tuple[datetime, date
     not_before = _parse_asn1_time(cert["notBefore"])
     not_after = _parse_asn1_time(cert["notAfter"])
     return not_before, not_after
+
+
+def pem_cert_dates(path: Path) -> Tuple[datetime, datetime]:
+    """Read notBefore/notAfter from a local PEM certificate via openssl."""
+
+    def _field(flag: str) -> datetime:
+        out = subprocess.check_output(
+            ["openssl", "x509", "-in", str(path), "-noout", flag],
+            text=True,
+        )
+        value = out.split("=", 1)[1].strip()
+        return _parse_asn1_time(value)
+
+    return _field("-startdate"), _field("-enddate")
 
 
 def days_until_expiry(not_after: datetime, now: datetime | None = None) -> int:

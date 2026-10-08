@@ -16,15 +16,18 @@ from cert_utils import (
     days_until_expiry,
     days_until_renewal_notice,
     fetch_cert_dates,
+    pem_cert_dates,
     renewal_notice_date,
 )
 from prepare_certbot_config import prepare_config_for_runner
 
 REMINDER_DAYS_BEFORE_RENEWAL_NOTICE = (7, 3, 1)
 DEFAULT_RENEWAL_LEAD_DAYS = 30
+PUBLIC_CERT_NAMES = ("fullchain.pem", "cert.pem", "chain.pem")
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 LE_ROOT = Path(os.environ.get("LETSENCRYPT_ROOT", REPO_ROOT / "data" / "letsencrypt"))
+DEFAULT_RECIPIENTS_FILE = REPO_ROOT / "config" / "recipients.txt"
 
 
 def load_config(path: Path) -> tuple[list[dict], int]:
@@ -48,16 +51,50 @@ def client_dirs(client_id: str) -> tuple[Path, Path, Path]:
     return config, work, logs
 
 
+def load_recipients(path: Path) -> list[str]:
+    if not path.is_file():
+        return []
+    recipients: list[str] = []
+    seen: set[str] = set()
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        key = line.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        recipients.append(line)
+    return recipients
+
+
+def public_cert_files(config_dir: Path) -> list[Path]:
+    live = config_dir / "live"
+    if not live.is_dir():
+        return []
+    found: list[Path] = []
+    for lineage in sorted(p for p in live.iterdir() if p.is_dir()):
+        if lineage.name.startswith("."):
+            continue
+        for name in PUBLIC_CERT_NAMES:
+            path = lineage / name
+            if path.is_file():
+                found.append(path)
+    return found
+
+
 def run_email(
     client: dict,
     *,
     kind: str,
     expires_on: str,
     renewal_notice_on: str,
+    recipients: list[str],
     days_until_notice: int | None = None,
+    attachments: list[Path] | None = None,
 ) -> None:
-    recipients = client.get("notify_emails") or []
     if not recipients:
+        print("  WARN: no recipients in config/recipients.txt - skipping email")
         return
     cmd = [
         sys.executable,
@@ -75,6 +112,8 @@ def run_email(
     ]
     if kind == "reminder":
         cmd.extend(["--days-until-renewal-notice", str(days_until_notice)])
+    for path in attachments or []:
+        cmd.extend(["--attach", str(path)])
     for addr in recipients:
         cmd.extend(["--to", addr])
     subprocess.run(cmd, check=True, env=os.environ)
@@ -88,12 +127,14 @@ def in_dev_mode(*, cli_flag: bool = False) -> bool:
     return cli_flag or truthy_env("DEV_MODE")
 
 
-def certbot_renew(client_id: str, *, dry_run: bool) -> None:
+def certbot_renew(client_id: str, *, dry_run: bool) -> list[Path]:
+    """Run certbot renew. Return public cert files that were newly issued."""
     config, work, logs = client_dirs(client_id)
     prepare_config_for_runner(config, work, logs)
     renewal_dir = config / "renewal"
     if not renewal_dir.is_dir() or not any(renewal_dir.glob("*.conf")):
         print(f"  WARN: no renewal/*.conf under {config} - certbot has nothing to renew")
+    before = {path.resolve(): path.resolve().read_bytes() for path in public_cert_files(config)}
     cmd = [
         "certbot",
         "renew",
@@ -109,6 +150,14 @@ def certbot_renew(client_id: str, *, dry_run: bool) -> None:
         cmd.append("--dry-run")
     print(f"  {' '.join(cmd)}")
     subprocess.run(cmd, check=True)
+    if dry_run:
+        return []
+    changed: list[Path] = []
+    for path in public_cert_files(config):
+        data = path.resolve().read_bytes()
+        if before.get(path.resolve()) != data:
+            changed.append(path)
+    return changed
 
 
 def fmt_dt(dt: datetime) -> str:
@@ -120,6 +169,12 @@ def fmt_dt(dt: datetime) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, default=REPO_ROOT / "config" / "clients.yaml")
+    parser.add_argument(
+        "--recipients",
+        type=Path,
+        default=DEFAULT_RECIPIENTS_FILE,
+        help="Text file with one email address per line",
+    )
     parser.add_argument("--dry-run", action="store_true", help="certbot renew --dry-run; skip email")
     parser.add_argument(
         "--dev",
@@ -140,11 +195,17 @@ def main() -> None:
     if not clients:
         raise SystemExit("No clients in config/clients.yaml")
 
+    recipients = load_recipients(args.recipients)
+    if not dry_run and not recipients:
+        print(f"WARN: no recipients found in {args.recipients}")
+
     errors = 0
     for client in clients:
         cid = client["id"]
         domain = client["domain"]
         lead = client_lead_days(client, default_lead)
+        expires_on = ""
+        renewal_notice_on = ""
         print(f"\n=== {cid} ({domain}) ===")
 
         try:
@@ -171,6 +232,7 @@ def main() -> None:
                         kind="reminder",
                         expires_on=expires_on,
                         renewal_notice_on=renewal_notice_on,
+                        recipients=recipients,
                         days_until_notice=until_notice,
                     )
                 elif until_notice == 0:
@@ -180,14 +242,44 @@ def main() -> None:
                         kind="renewal",
                         expires_on=expires_on,
                         renewal_notice_on=renewal_notice_on,
+                        recipients=recipients,
                     )
             except subprocess.CalledProcessError:
                 errors += 1
 
+        issued_files: list[Path] = []
         try:
-            certbot_renew(cid, dry_run=dry_run)
+            issued_files = certbot_renew(cid, dry_run=dry_run)
         except subprocess.CalledProcessError:
             print("  ERROR: certbot failed")
+            errors += 1
+            continue
+
+        if dry_run:
+            continue
+        if not issued_files:
+            print("  no new certificate issued")
+            continue
+
+        cert_pem = next((p for p in issued_files if p.name == "cert.pem"), None)
+        if cert_pem:
+            try:
+                _, not_after = pem_cert_dates(cert_pem)
+                expires_on = fmt_dt(not_after)
+            except Exception as exc:
+                print(f"  WARN: could not read new cert dates: {exc}")
+
+        print("  sending new certificate email (public PEMs attached)")
+        try:
+            run_email(
+                client,
+                kind="issued",
+                expires_on=expires_on or "unknown",
+                renewal_notice_on=renewal_notice_on or "unknown",
+                recipients=recipients,
+                attachments=issued_files,
+            )
+        except subprocess.CalledProcessError:
             errors += 1
 
     if errors:

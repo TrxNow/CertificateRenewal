@@ -8,6 +8,7 @@ import os
 import smtplib
 import ssl
 from email.message import EmailMessage
+from pathlib import Path
 from typing import Iterable
 
 
@@ -60,6 +61,50 @@ You will receive a separate renewal email on the planned renewal notice date whe
     _smtp_send(msg)
 
 
+def send_issued_email(
+    *,
+    to_addresses: Iterable[str],
+    client_name: str,
+    domain: str,
+    renewal_notice_on: str,
+    expires_on: str,
+    attachments: Iterable[Path],
+) -> None:
+    subject = f"[Certificate] {client_name}: new certificate issued"
+    body = f"""Hello,
+
+The Let's Encrypt certificate for {client_name} ({domain}) was renewed. The public certificate files are attached so they can be sent to AT&T.
+
+Domain: {domain}
+Renewal notice date (UTC): {renewal_notice_on}
+New certificate expiration (UTC): {expires_on}
+
+Attached:
+- fullchain.pem — certificate plus chain (send this to AT&T)
+- cert.pem — leaf certificate only
+- chain.pem — intermediate chain only
+
+The private key is not attached. Do not email the private key.
+
+— Certificate Renewal automation
+"""
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["To"] = ", ".join(to_addresses)
+    msg.set_content(body)
+    for path in attachments:
+        if path.name.lower() == "privkey.pem":
+            raise SystemExit("refusing to attach private key")
+        filename = f"{path.parent.name}-{path.name}"
+        msg.add_attachment(
+            path.read_bytes(),
+            maintype="application",
+            subtype="x-pem-file",
+            filename=filename,
+        )
+    _smtp_send(msg)
+
+
 def send_renewal_email(
     *,
     to_addresses: Iterable[str],
@@ -71,7 +116,7 @@ def send_renewal_email(
     subject = f"[Certificate] {client_name}: renewal in progress today"
     body = f"""Hello,
 
-This is the automated renewal notice for {client_name}. The certificate renewal job is running certbot renew today.
+This is the automated renewal notice for {client_name}. The certificate renewal job is running certbot renew today. If a new certificate is issued, you will receive a follow-up email with the public certificate files attached to send to AT&T.
 
 Domain: {domain}
 Renewal notice date (UTC): {renewal_notice_on}
@@ -95,13 +140,20 @@ def main() -> None:
     parser.add_argument("--to", action="append", required=True, dest="recipients")
     parser.add_argument(
         "--kind",
-        choices=("reminder", "renewal"),
+        choices=("reminder", "renewal", "issued"),
         required=True,
     )
     parser.add_argument(
         "--days-until-renewal-notice",
         type=int,
         help="Required for reminder emails (7, 3, or 1)",
+    )
+    parser.add_argument(
+        "--attach",
+        action="append",
+        default=[],
+        dest="attachments",
+        help="Public certificate PEM to attach (issued emails). Never attach privkey.pem.",
     )
     args = parser.parse_args()
 
@@ -119,6 +171,19 @@ def main() -> None:
         print(
             f"Sent {args.days_until_renewal_notice}-day reminder for {args.domain}"
         )
+    elif args.kind == "issued":
+        attachments = [Path(p) for p in args.attachments]
+        if not attachments:
+            raise SystemExit("--attach required for issued email")
+        send_issued_email(
+            to_addresses=args.recipients,
+            client_name=args.client_name,
+            domain=args.domain,
+            renewal_notice_on=args.renewal_notice_on,
+            expires_on=args.expires_on,
+            attachments=attachments,
+        )
+        print(f"Sent new certificate for {args.domain} to {', '.join(args.recipients)}")
     else:
         send_renewal_email(
             to_addresses=args.recipients,

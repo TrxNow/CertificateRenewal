@@ -4,5 +4,3 @@ clients:
   - id: client-short-name
     name: Display Name
     domain: www.example.com
-    notify_emails:
-      - ops@example.com
